@@ -1,0 +1,106 @@
+// SQLite for local development. For production switch provider to "postgresql"
+// and point DATABASE_URL at your Postgres instance.
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String?
+  passwordHash String
+  createdAt    DateTime @default(now())
+
+  // Subscription state, kept in sync by the payment providers' webhooks.
+  plan               String    @default("free") // free | starter | pro
+  subscriptionStatus String    @default("none") // none | active | trialing | past_due | canceled
+  billingProvider    String? // stripe | liqpay | monobank | demo
+  // Stripe subscription id, or the BillingSubscription id for LiqPay/Monobank.
+  subscriptionRef    String?   @unique
+  stripeCustomerId   String?   @unique
+  currentPeriodEnd   DateTime?
+
+  // JSON overrides for per-country cost assumptions (duty, fees, ...).
+  costSettings String?
+
+  sessions             Session[]
+  usageEvents          UsageEvent[]
+  savedProducts        SavedProduct[]
+  billingSubscriptions BillingSubscription[]
+}
+
+model Session {
+  // SHA-256 of the cookie token, so a leaked DB can't be used to log in.
+  id        String   @id
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model UsageEvent {
+  id        String   @id @default(cuid())
+  userId    String
+  kind      String // search | analysis
+  // Identifies the request (e.g. hashed query) so reloading a page doesn't count twice.
+  ref       String?
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, kind, createdAt])
+}
+
+model SavedProduct {
+  id            String   @id @default(cuid())
+  userId        String
+  source        String // cj | custom
+  externalId    String
+  title         String
+  imageUrl      String?
+  // Full AnalysisResult snapshot as JSON, so saved items render without new API calls.
+  analysis      String
+  bestCountry   String?
+  bestMarginPct Float?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, source, externalId])
+}
+
+// Shared cache for third-party API responses and provider access tokens,
+// so repeated searches don't burn eBay/CJ quotas.
+model ApiCache {
+  key       String   @id
+  value     String
+  expiresAt DateTime
+
+  @@index([expiresAt])
+}
+
+// One row per LiqPay/Monobank subscription checkout. Its id is the order reference
+// sent to the provider, so callbacks can be matched back to a user and plan.
+model BillingSubscription {
+  id               String    @id @default(cuid())
+  userId           String
+  provider         String // liqpay | monobank
+  plan             String
+  amountMinor      Int // kopecks
+  currency         String
+  status           String    @default("pending") // pending | active | past_due | canceled
+  // Monobank subscriptionId (LiqPay identifies subscriptions by our id as order_id).
+  providerRef      String?   @unique
+  currentPeriodEnd DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
