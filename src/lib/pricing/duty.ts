@@ -84,8 +84,22 @@ export interface ImportCharges {
   /** Carrier handling, brokerage and processing fees. */
   feesUsd: number;
   totalUsd: number;
-  /** Plain-language explanation of which rules applied. */
-  notes: string[];
+  /** Which rules applied, as message codes the UI translates (see DUTY_NOTE_CODES). */
+  notes: DutyNote[];
+}
+
+export type DutyNoteCode =
+  | "uaUnder" | "uaOver" | "uaPending"
+  | "usOverride" | "usStack" | "usFee"
+  | "gbUnder" | "gbOver"
+  | "euFlat" | "euFeeActive" | "euFeeUpcoming" | "euOver"
+  | "caUnder" | "caOver"
+  | "auUnder" | "auOver"
+  | "handling";
+
+export interface DutyNote {
+  code: DutyNoteCode;
+  vars?: Record<string, string | number>;
 }
 
 const round = (n: number) => Math.round(n * 100) / 100;
@@ -95,7 +109,7 @@ export function calculateImportCharges(input: ImportInput): ImportCharges {
   const rates = categoryRates(input.category);
   const lines = Math.max(1, Math.round(input.tariffLines ?? 1));
   const date = input.date ?? new Date();
-  const notes: string[] = [];
+  const notes: DutyNote[] = [];
   let duty = 0;
   let vat = 0;
   let fees = 0;
@@ -107,15 +121,15 @@ export function calculateImportCharges(input: ImportInput): ImportCharges {
     // Customs Code art. 234: parcels to individuals are free up to €150 of goods value (shipping excluded).
     const allowanceUsd = 150 * usdPer("EUR");
     if (goodsUsd <= allowanceUsd) {
-      notes.push("Under Ukraine's €150 duty-free allowance (goods value, shipping not counted).");
+      notes.push({ code: "uaUnder" });
     } else {
       const excess = goodsUsd - allowanceUsd;
       const rate = rateOr(0.1);
       duty = excess * rate;
       vat = (excess + duty) * 0.2;
-      notes.push(`Above €150: ${pct(rate)} duty and 20% VAT on the excess over €150.`);
+      notes.push({ code: "uaOver", vars: { rate: pct(rate) } });
     }
-    notes.push("Pending bills 15460/16051-1 would charge VAT from the first euro, from 1 July 2027 at the earliest.");
+    notes.push({ code: "uaPending" });
   } else if (country === "US") {
     // De minimis is suspended; ad valorem duty on the goods value (US customs value excludes international freight).
     const rate = rateOr(rates.usMfn + rates.us301 + US_FORCED_LABOR_301);
@@ -123,63 +137,61 @@ export function calculateImportCharges(input: ImportInput): ImportCharges {
     fees = 2;
     notes.push(
       input.dutyRateOverride !== undefined
-        ? `Your duty rate ${pct(rate)} on goods value (no de minimis since Aug 2025).`
-        : `No de minimis: MFN ${pct(rates.usMfn)} + Section 301 ${pct(rates.us301)} + 12.5% forced-labor tariff on goods value.`,
-      "≈$2 entry processing fee (estimate).",
+        ? { code: "usOverride", vars: { rate: pct(rate) } }
+        : { code: "usStack", vars: { mfn: pct(rates.usMfn), s301: pct(rates.us301) } },
+      { code: "usFee" },
     );
   } else if (country === "GB") {
     const thresholdUsd = 135 * usdPer("GBP");
     if (goodsUsd <= thresholdUsd) {
-      notes.push("≤ £135: no customs duty; 20% VAT is charged at sale by the marketplace.");
+      notes.push({ code: "gbUnder" });
     } else {
       const rate = rateOr(rates.eu);
       duty = (goodsUsd + shippingUsd) * rate;
       fees = 10 * usdPer("GBP");
-      notes.push(`Above £135: ~${pct(rate)} duty on goods + shipping, VAT at the border, ~£10 carrier fee.`);
+      notes.push({ code: "gbOver", vars: { rate: pct(rate) } });
     }
   } else if (EU_COUNTRIES.has(country)) {
     const thresholdUsd = 150 * usdPer("EUR");
     if (goodsUsd <= thresholdUsd) {
       duty = 3 * lines * usdPer("EUR");
-      notes.push(`≤ €150: flat €3 duty per tariff line (${lines}) since 1 July 2026; VAT charged at sale via IOSS.`);
+      notes.push({ code: "euFlat", vars: { lines } });
       if (date >= EU_HANDLING_FEE_FROM) {
         fees = 2 * lines * usdPer("EUR");
-        notes.push("€2 EU handling fee per item from 1 November 2026.");
+        notes.push({ code: "euFeeActive" });
       } else {
-        notes.push("An EU €2 handling fee per item starts 1 November 2026.");
+        notes.push({ code: "euFeeUpcoming" });
       }
     } else {
       const rate = rateOr(rates.eu);
       duty = (goodsUsd + shippingUsd) * rate;
       fees = 10 * usdPer("EUR");
-      notes.push(`Above €150: ${pct(rate)} duty on goods + shipping, VAT at the border, ~€10 broker fee.`);
+      notes.push({ code: "euOver", vars: { rate: pct(rate) } });
     }
   } else if (country === "CA") {
     // China-origin goods: only CAD 20 is waived; above it duty and GST apply to the full value.
     const thresholdUsd = 20 * usdPer("CAD");
     if (goodsUsd <= thresholdUsd) {
-      notes.push("≤ CAD 20: no duty or GST for postal/courier imports.");
+      notes.push({ code: "caUnder" });
     } else {
       const rate = rateOr(rates.ca);
       duty = goodsUsd * rate;
       vat = (goodsUsd + duty) * 0.05;
       fees = 9.95 * usdPer("CAD");
-      notes.push(
-        `Above CAD 20: ${pct(rate)} duty and 5% GST on the full value (HST provinces up to 15%), CAD 9.95 Canada Post fee.`,
-      );
+      notes.push({ code: "caOver", vars: { rate: pct(rate) } });
     }
   } else if (country === "AU") {
     const thresholdUsd = 1000 * usdPer("AUD");
     if (goodsUsd <= thresholdUsd) {
-      notes.push("≤ A$1,000: no duty; 10% GST is charged at sale by the marketplace.");
+      notes.push({ code: "auUnder" });
     } else {
-      notes.push("Above A$1,000: 0% duty for China under ChAFTA (with origin proof); GST and broker fees at the border.");
+      notes.push({ code: "auOver" });
     }
   }
 
   if (input.handlingFee) {
     fees += input.handlingFee * usdPer(input.currency);
-    notes.push("Includes your extra per-parcel handling fee.");
+    notes.push({ code: "handling" });
   }
 
   return {

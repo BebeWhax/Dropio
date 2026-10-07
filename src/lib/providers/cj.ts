@@ -114,6 +114,34 @@ export class CjProvider implements SupplierProvider {
     });
   }
 
+  /**
+   * Supplier products that look like the image. CJ fetches the image itself, so
+   * it must be publicly reachable, and the endpoint needs a Level 3+ CJ account.
+   */
+  async searchByImage(imageUrl: string): Promise<SupplierProduct[]> {
+    return cached(`cj:image:${imageUrl}`, 24 * 3600, async () => {
+      const data = await this.call<Record<string, unknown>[] | null>("/product/queryProductsByImage", {
+        method: "POST",
+        body: JSON.stringify({ imageUrl }),
+      });
+      return (data ?? []).flatMap((p): SupplierProduct[] => {
+        const price = parseCjPrice(p.sellPrice);
+        if (!p.id || !price) return [];
+        return [
+          {
+            id: String(p.id),
+            title: String(p.nameEn ?? p.name ?? ""),
+            imageUrl: typeof p.bigImage === "string" ? p.bigImage : undefined,
+            priceUsd: price.min,
+            priceMaxUsd: price.max > price.min ? price.max : undefined,
+            weightGrams: parseWeight(p.packWeight) ?? parseWeight(p.weight),
+            category: typeof p.category === "string" ? p.category : undefined,
+          },
+        ];
+      });
+    });
+  }
+
   async getProduct(id: string): Promise<SupplierProductDetail | null> {
     return cached(`cj:product:${id}`, 24 * 3600, async () => {
       const p = await this.call<Record<string, unknown> | null>(`/product/query?pid=${encodeURIComponent(id)}`);

@@ -3,34 +3,38 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { DemoBanner } from "@/components/demo-banner";
 import { Notice, PageHeader, ProductImage, Skeleton, usd } from "@/components/ui";
+import { fmt } from "@/i18n/config";
+import type { Messages } from "@/i18n/messages";
+import { getMessages } from "@/i18n/server";
 import { analyzeHref } from "@/lib/analyze-request";
 import { requireUser } from "@/lib/auth";
 import { effectivePlan } from "@/lib/plans";
 import { getSupplierProvider } from "@/lib/providers";
 import { consumeQuota, QuotaExceededError } from "@/lib/usage";
 
-export const metadata: Metadata = { title: "Product research" };
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getMessages()).research.title };
+}
 
-export default function ResearchPage({ searchParams }: PageProps<"/dashboard/research">) {
+type Props = Pick<PageProps<"/dashboard/research">, "searchParams">;
+
+export default async function ResearchPage({ searchParams }: PageProps<"/dashboard/research">) {
+  const t = await getMessages();
   return (
     <>
-      <PageHeader title="Product research" description="Search supplier products, then analyze margins across countries." />
+      <PageHeader title={t.research.title} description={t.research.description} />
       <div className="grid gap-6 lg:grid-cols-[1fr_280px]">
         <div>
-          <Suspense fallback={<Skeleton className="h-11" />}>
-            <SearchForm searchParams={searchParams} />
-          </Suspense>
+          <SearchForm searchParams={searchParams} t={t} />
           <Suspense fallback={<ResultsSkeleton />}>
             <Results searchParams={searchParams} />
           </Suspense>
         </div>
-        <CustomProductForm />
+        <CustomProductForm t={t} />
       </div>
     </>
   );
 }
-
-type Props = Pick<PageProps<"/dashboard/research">, "searchParams">;
 
 async function readQuery(searchParams: Props["searchParams"]) {
   const sp = await searchParams;
@@ -39,20 +43,21 @@ async function readQuery(searchParams: Props["searchParams"]) {
   return { q, page };
 }
 
-async function SearchForm({ searchParams }: Props) {
+async function SearchForm({ searchParams, t }: Props & { t: Messages }) {
   const { q } = await readQuery(searchParams);
   return (
     <form className="flex gap-2" action="/dashboard/research">
-      <input name="q" defaultValue={q} placeholder="e.g. pet hair remover, led strip, phone holder" className="input" required />
+      <input name="q" defaultValue={q} placeholder={t.research.placeholder} className="input" required />
       <button type="submit" className="btn-primary">
-        Search
+        {t.research.search}
       </button>
     </form>
   );
 }
 
 async function Results({ searchParams }: Props) {
-  const user = await requireUser();
+  const [user, messages] = await Promise.all([requireUser(), getMessages()]);
+  const t = messages.research;
   const { q, page } = await readQuery(searchParams);
   const supplier = getSupplierProvider();
 
@@ -60,9 +65,7 @@ async function Results({ searchParams }: Props) {
     return (
       <div className="mt-6">
         <DemoBanner suppliers={supplier.isDemo} markets={false} />
-        <div className="card p-10 text-center text-sm text-muted">
-          Search {supplier.name}&apos;s catalog by keyword. Each result can be analyzed against marketplace prices.
-        </div>
+        <div className="card p-10 text-center text-sm text-muted">{fmt(t.empty, { supplier: supplier.name })}</div>
       </div>
     );
   }
@@ -70,7 +73,18 @@ async function Results({ searchParams }: Props) {
   try {
     await consumeQuota(user.id, effectivePlan(user), "search", `${q.toLowerCase()}:${page}`);
   } catch (err) {
-    if (err instanceof QuotaExceededError) return <QuotaNotice message={err.message} />;
+    if (err instanceof QuotaExceededError) {
+      return (
+        <div className="mt-6">
+          <Notice tone="warning">
+            {fmt(messages.common.quotaReached, { kind: messages.common.quotaKinds[err.kind], limit: err.limit })}{" "}
+            <Link href="/dashboard/billing" className="font-medium underline">
+              {messages.common.seePlans}
+            </Link>
+          </Notice>
+        </div>
+      );
+    }
     throw err;
   }
 
@@ -80,7 +94,7 @@ async function Results({ searchParams }: Props) {
   } catch (err) {
     return (
       <div className="mt-6">
-        <Notice tone="error">Supplier search failed: {err instanceof Error ? err.message : "unknown error"}</Notice>
+        <Notice tone="error">{fmt(t.failed, { error: err instanceof Error ? err.message : "?" })}</Notice>
       </div>
     );
   }
@@ -88,11 +102,9 @@ async function Results({ searchParams }: Props) {
   return (
     <div className="mt-6">
       <DemoBanner suppliers={supplier.isDemo} markets={false} />
-      <p className="mb-3 text-sm text-muted">
-        {results.total.toLocaleString("en-US")} results for “{q}”
-      </p>
+      <p className="mb-3 text-sm text-muted">{fmt(t.results, { count: results.total.toLocaleString("en-US"), q })}</p>
       {results.items.length === 0 ? (
-        <div className="card p-10 text-center text-sm text-muted">No products found. Try a broader keyword.</div>
+        <div className="card p-10 text-center text-sm text-muted">{t.noResults}</div>
       ) : (
         <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1 2xl:grid-cols-2">
           {results.items.map((p) => (
@@ -103,13 +115,13 @@ async function Results({ searchParams }: Props) {
                   {p.title}
                 </p>
                 <p className="mt-1 text-xs text-muted">
-                  Cost {usd(p.priceUsd)}
+                  {fmt(t.cost, { price: usd(p.priceUsd) })}
                   {p.priceMaxUsd ? ` – ${usd(p.priceMaxUsd)}` : ""}
                   {p.category ? ` · ${p.category}` : ""}
                 </p>
                 <div className="mt-auto pt-2">
                   <Link href={analyzeHref({ source: "cj", id: p.id })} className="text-sm font-medium text-accent">
-                    Analyze margins →
+                    {t.analyze}
                   </Link>
                 </div>
               </div>
@@ -120,30 +132,17 @@ async function Results({ searchParams }: Props) {
       <div className="mt-4 flex justify-between text-sm">
         {page > 1 ? (
           <Link href={`/dashboard/research?q=${encodeURIComponent(q)}&page=${page - 1}`} className="btn-secondary">
-            ← Previous
+            {t.prev}
           </Link>
         ) : (
           <span />
         )}
         {results.items.length > 0 && page * results.items.length < results.total && (
           <Link href={`/dashboard/research?q=${encodeURIComponent(q)}&page=${page + 1}`} className="btn-secondary">
-            Next →
+            {t.next}
           </Link>
         )}
       </div>
-    </div>
-  );
-}
-
-function QuotaNotice({ message }: { message: string }) {
-  return (
-    <div className="mt-6">
-      <Notice tone="warning">
-        {message}{" "}
-        <Link href="/dashboard/billing" className="font-medium underline">
-          See plans
-        </Link>
-      </Notice>
     </div>
   );
 }
@@ -158,52 +157,57 @@ function ResultsSkeleton() {
   );
 }
 
-function CustomProductForm() {
+function CustomProductForm({ t: messages }: { t: Messages }) {
+  const t = messages.research;
   return (
     <aside className="card h-fit p-4">
-      <h2 className="font-semibold">Analyze your own product</h2>
+      <h2 className="font-semibold">{t.customTitle}</h2>
       <p className="mt-1 mb-4 text-xs text-muted">
-        Found something on AliExpress or another supplier? Enter its cost and we&apos;ll compare it against the market.
+        {t.customHint} {t.manyProducts}{" "}
+        <Link href="/dashboard/bulk" className="text-accent">
+          {t.uploadCsv}
+        </Link>
+        .
       </p>
       <form action="/dashboard/analyze" className="space-y-3">
         <input type="hidden" name="source" value="custom" />
         <input type="hidden" name="run" value="1" />
         <div>
           <label className="label" htmlFor="custom-title">
-            Product title
+            {t.productTitle}
           </label>
-          <input id="custom-title" name="title" required maxLength={200} className="input" placeholder="Magnetic phone car mount" />
+          <input id="custom-title" name="title" required maxLength={200} className="input" placeholder={t.productTitlePh} />
         </div>
         <div className="grid grid-cols-2 gap-2">
           <div>
             <label className="label" htmlFor="custom-cost">
-              Unit cost (USD)
+              {t.unitCost}
             </label>
-            <input id="custom-cost" name="cost" type="number" step="0.01" min="0" required className="input" />
+            <input id="custom-cost" name="cost" type="number" step="0.01" min="0" className="input" placeholder={t.optional} />
           </div>
           <div>
             <label className="label" htmlFor="custom-shipping">
-              Shipping (USD)
+              {t.shipping}
             </label>
-            <input id="custom-shipping" name="shipping" type="number" step="0.01" min="0" className="input" placeholder="auto" />
+            <input id="custom-shipping" name="shipping" type="number" step="0.01" min="0" className="input" placeholder={t.auto} />
           </div>
         </div>
         <div className="grid grid-cols-2 gap-2">
           <div>
             <label className="label" htmlFor="custom-weight">
-              Weight (g)
+              {t.weight}
             </label>
             <input id="custom-weight" name="weight" type="number" min="0" className="input" placeholder="250" />
           </div>
           <div>
             <label className="label" htmlFor="custom-gtin">
-              EAN/UPC
+              {t.gtin}
             </label>
-            <input id="custom-gtin" name="gtin" inputMode="numeric" className="input" placeholder="optional" />
+            <input id="custom-gtin" name="gtin" inputMode="numeric" className="input" placeholder={t.optional} />
           </div>
         </div>
         <button type="submit" className="btn-primary w-full">
-          Analyze
+          {t.analyzeBtn}
         </button>
       </form>
     </aside>

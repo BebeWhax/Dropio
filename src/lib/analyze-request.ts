@@ -4,6 +4,7 @@ import type { AnalysisInput } from "@/lib/analysis";
 import type { CurrentUser } from "@/lib/auth";
 import { COUNTRY_CODES, isCountryCode, parseCostSettings, type CountryCode } from "@/lib/markets";
 import type { Plan } from "@/lib/plans";
+import { isChannelId, type ChannelId } from "@/lib/channels";
 import { isCategoryId, type CategoryId } from "@/lib/pricing/duty";
 import type { ImportPayer } from "@/lib/pricing/landed-cost";
 import { buildSearchQuery } from "@/lib/pricing/matching";
@@ -29,6 +30,11 @@ export interface AnalyzeParams {
   category: CategoryId;
   shippingPref: ShippingPreference;
   importPayer: ImportPayer;
+  channel: ChannelId | "auto";
+  /** Commission override, as a fraction (form field is a percentage). */
+  commissionPct?: number;
+  ordersPerMonth: number;
+  adCostUsd: number;
   countries: CountryCode[];
   run: boolean;
 }
@@ -68,6 +74,13 @@ export function readAnalyzeParams(source: ParamSource): AnalyzeParams {
     category: isCategoryId(one("cat")) ? (one("cat") as CategoryId) : "other",
     shippingPref: isShippingPreference(one("ship")) ? (one("ship") as ShippingPreference) : "balanced",
     importPayer: one("payer") === "buyer" ? "buyer" : "seller",
+    channel: isChannelId(one("ch")) ? (one("ch") as ChannelId) : "auto",
+    commissionPct: (() => {
+      const pct = toNumber(one("comm"));
+      return pct !== undefined && pct <= 60 ? pct / 100 : undefined;
+    })(),
+    ordersPerMonth: Math.min(100000, Math.max(1, Math.round(toNumber(one("opm")) ?? 30))),
+    adCostUsd: Math.min(1000, toNumber(one("ads")) ?? 0),
     countries: [...new Set(countries)],
     run: one("run") === "1",
   };
@@ -80,22 +93,22 @@ export type BuiltAnalysis =
       product: SupplierProductDetail | null;
       /** Stable identifier for usage de-duplication and saving. */
       ref: string;
-      notices: string[];
+      notices: { code: "countries"; vars: { plan: string; n: number } }[];
     }
-  | { ok: false; error: string };
+  | { ok: false; error: "noTitle" | "noProduct" | "notFound" | "supplier"; detail?: string };
 
 export async function buildAnalysisInput(
   params: AnalyzeParams,
   user: CurrentUser,
   plan: Plan,
 ): Promise<BuiltAnalysis> {
-  const notices: string[] = [];
+  const notices: Extract<BuiltAnalysis, { ok: true }>["notices"] = [];
 
   let countries = params.countries.length
     ? params.countries
     : DEFAULT_COUNTRY_ORDER.slice(0, plan.maxCountries);
   if (countries.length > plan.maxCountries) {
-    notices.push(`Your ${plan.name} plan compares up to ${plan.maxCountries} countries at once. Extra countries were skipped.`);
+    notices.push({ code: "countries", vars: { plan: plan.name, n: plan.maxCountries } });
     countries = countries.slice(0, plan.maxCountries);
   }
   countries = COUNTRY_CODES.filter((c) => countries.includes(c));
@@ -105,9 +118,8 @@ export async function buildAnalysisInput(
   let product: SupplierProductDetail | null = null;
 
   if (params.source === "custom") {
-    if (!params.title || params.cost === undefined) {
-      return { ok: false, error: "Enter a product title and supplier cost." };
-    }
+    // Cost is optional: without it the analysis shows market prices only, no margin.
+    if (!params.title) return { ok: false, error: "noTitle" };
     const id = createHash("sha256").update(`${params.title}|${params.cost}`).digest("hex").slice(0, 16);
     input = {
       source: "custom",
@@ -119,6 +131,10 @@ export async function buildAnalysisInput(
       category: params.category,
       shippingPreference: params.shippingPref,
       importPayer: params.importPayer,
+      channel: params.channel,
+      commissionPct: params.commissionPct,
+      ordersPerMonth: params.ordersPerMonth,
+      adCostUsd: params.adCostUsd,
       supplierCostUsd: params.cost,
       weightGrams: params.weight,
       shippingUsdOverride: params.shipping,
@@ -126,13 +142,13 @@ export async function buildAnalysisInput(
       settings,
     };
   } else {
-    if (!params.id) return { ok: false, error: "No product selected." };
+    if (!params.id) return { ok: false, error: "noProduct" };
     try {
       product = await getSupplierProvider().getProduct(params.id);
     } catch (err) {
-      return { ok: false, error: err instanceof Error ? err.message : "Could not load the supplier product." };
+      return { ok: false, error: "supplier", detail: err instanceof Error ? err.message : undefined };
     }
-    if (!product) return { ok: false, error: "Supplier product not found." };
+    if (!product) return { ok: false, error: "notFound" };
 
     const variant = product.variants.find((v) => v.id === params.variant) ?? product.variants[0];
     input = {
@@ -146,6 +162,10 @@ export async function buildAnalysisInput(
       category: params.category,
       shippingPreference: params.shippingPref,
       importPayer: params.importPayer,
+      channel: params.channel,
+      commissionPct: params.commissionPct,
+      ordersPerMonth: params.ordersPerMonth,
+      adCostUsd: params.adCostUsd,
       supplierCostUsd: variant?.priceUsd ?? product.priceUsd,
       weightGrams: variant?.weightGrams ?? product.weightGrams,
       variantId: variant?.id,
@@ -180,6 +200,10 @@ export function analyzeSearchParams(params: Partial<AnalyzeParams>): URLSearchPa
   if (params.category) sp.set("cat", params.category);
   if (params.shippingPref) sp.set("ship", params.shippingPref);
   if (params.importPayer) sp.set("payer", params.importPayer);
+  if (params.channel && params.channel !== "auto") sp.set("ch", params.channel);
+  if (params.commissionPct !== undefined) sp.set("comm", String(Math.round(params.commissionPct * 10000) / 100));
+  if (params.ordersPerMonth && params.ordersPerMonth !== 30) sp.set("opm", String(params.ordersPerMonth));
+  if (params.adCostUsd) sp.set("ads", String(params.adCostUsd));
   if (params.countries?.length) sp.set("c", params.countries.join(","));
   if (params.run) sp.set("run", "1");
   return sp;

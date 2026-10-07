@@ -28,10 +28,15 @@ model User {
   // JSON overrides for per-country cost assumptions (duty, fees, ...).
   costSettings String?
 
+  // Interface language: en | uk.
+  locale String @default("en")
+
   sessions             Session[]
   usageEvents          UsageEvent[]
   savedProducts        SavedProduct[]
   billingSubscriptions BillingSubscription[]
+  bulkJobs             BulkJob[]
+  imageSearches        ImageSearch[]
 }
 
 model Session {
@@ -103,4 +108,59 @@ model BillingSubscription {
   user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+}
+
+// A CSV upload: one job, one row per product, processed in the background.
+model BulkJob {
+  id        String    @id @default(cuid())
+  userId    String
+  fileName  String
+  status    String    @default("queued") // queued | running | done
+  // Analysis options applied to every row (JSON: countries, category, shipping, payer).
+  options   String
+  totalRows Int
+  doneRows  Int       @default(0)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  rows      BulkRow[]
+
+  @@index([userId, createdAt])
+}
+
+model BulkRow {
+  id       String  @id @default(cuid())
+  jobId    String
+  position Int
+  title    String
+  cost     Float?
+  shipping Float?
+  gtin     String?
+  queryUa  String?
+  status   String  @default("pending") // pending | done | failed
+  // AnalysisResult JSON once processed.
+  result   String?
+  error    String?
+  job      BulkJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId, position])
+}
+
+// A search-by-image. The (downscaled) photo is stored so services that need a
+// public URL (CJ, Google Lens) can fetch it from /api/img/<publicToken>.
+model ImageSearch {
+  id          String   @id @default(cuid())
+  userId      String
+  // Random, unguessable token used in the public image URL.
+  publicToken String   @unique
+  imageMime   String
+  imageData   Bytes
+  country     String
+  hint        String?
+  // ImageSearchResult JSON.
+  result      String?
+  createdAt   DateTime @default(now())
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
 }

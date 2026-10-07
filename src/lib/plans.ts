@@ -1,18 +1,19 @@
 export type PlanId = "free" | "starter" | "pro";
 
+/** Plan limits and prices. Names and marketing copy live in the i18n messages (plans.*). */
 export interface Plan {
   id: PlanId;
+  /** Internal/English name, e.g. for payment descriptions. */
   name: string;
   priceUsd: number;
   /** Fixed monthly price for LiqPay / Monobank checkout, in hryvnia. */
   priceUah: number;
-  tagline: string;
   searchesPerDay: number;
   analysesPerDay: number;
+  imageSearchesPerDay: number;
   /** How many countries one analysis may compare. */
   maxCountries: number;
   maxSaved: number;
-  features: string[];
 }
 
 export const PLANS: Record<PlanId, Plan> = {
@@ -21,36 +22,33 @@ export const PLANS: Record<PlanId, Plan> = {
     name: "Free",
     priceUsd: 0,
     priceUah: 0,
-    tagline: "Try the research workflow",
     searchesPerDay: 10,
     analysesPerDay: 3,
+    imageSearchesPerDay: 3,
     maxCountries: 2,
     maxSaved: 5,
-    features: ["Supplier product search", "Landed-cost margin per country", "Save up to 5 products"],
   },
   starter: {
     id: "starter",
     name: "Starter",
     priceUsd: 19,
     priceUah: 799,
-    tagline: "For new stores validating products",
     searchesPerDay: 150,
     analysesPerDay: 40,
+    imageSearchesPerDay: 30,
     maxCountries: 4,
     maxSaved: 100,
-    features: ["Compare 4 countries at once", "40 analyses per day", "Custom cost assumptions", "Watchlist of 100 products"],
   },
   pro: {
     id: "pro",
     name: "Pro",
     priceUsd: 49,
     priceUah: 1999,
-    tagline: "For sellers scaling across markets",
     searchesPerDay: 1000,
     analysesPerDay: 250,
+    imageSearchesPerDay: 150,
     maxCountries: 9,
     maxSaved: 1000,
-    features: ["All 9 markets incl. Ukraine", "250 analyses per day", "Custom cost assumptions", "Watchlist of 1,000 products"],
   },
 };
 

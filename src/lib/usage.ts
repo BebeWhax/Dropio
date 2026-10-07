@@ -2,7 +2,7 @@ import "server-only";
 import { db } from "@/lib/db";
 import type { Plan } from "@/lib/plans";
 
-export type UsageKind = "search" | "analysis";
+export type UsageKind = "search" | "analysis" | "image";
 
 export class QuotaExceededError extends Error {
   constructor(
@@ -20,16 +20,18 @@ function startOfUtcDay(): Date {
 }
 
 function limitFor(plan: Plan, kind: UsageKind): number {
+  if (kind === "image") return plan.imageSearchesPerDay;
   return kind === "search" ? plan.searchesPerDay : plan.analysesPerDay;
 }
 
 export async function getUsageToday(userId: string): Promise<Record<UsageKind, number>> {
   const since = startOfUtcDay();
-  const [search, analysis] = await Promise.all([
+  const [search, analysis, image] = await Promise.all([
     db.usageEvent.count({ where: { userId, kind: "search", createdAt: { gte: since } } }),
     db.usageEvent.count({ where: { userId, kind: "analysis", createdAt: { gte: since } } }),
+    db.usageEvent.count({ where: { userId, kind: "image", createdAt: { gte: since } } }),
   ]);
-  return { search, analysis };
+  return { search, analysis, image };
 }
 
 /**

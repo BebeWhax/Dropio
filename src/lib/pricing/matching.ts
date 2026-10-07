@@ -37,6 +37,31 @@ export function buildSearchQuery(title: string, maxTokens = 5): string {
   return tokens.join(" ");
 }
 
+/**
+ * Turns the titles of visually matched products into a short text query: the
+ * words shared by the most titles, in the order they first appear.
+ */
+export function deriveQueryFromTitles(titles: string[], maxTokens = 5): string {
+  const docFreq = new Map<string, number>();
+  const firstSeen = new Map<string, number>();
+  let order = 0;
+  for (const title of titles) {
+    for (const token of new Set(tokenize(title))) {
+      if (/^\d+$/.test(token)) continue;
+      docFreq.set(token, (docFreq.get(token) ?? 0) + 1);
+      if (!firstSeen.has(token)) firstSeen.set(token, order++);
+    }
+  }
+  const minShared = titles.length >= 3 ? 2 : 1;
+  return [...docFreq.entries()]
+    .filter(([, n]) => n >= minShared)
+    .sort((a, b) => b[1] - a[1] || firstSeen.get(a[0])! - firstSeen.get(b[0])!)
+    .slice(0, maxTokens)
+    .sort((a, b) => firstSeen.get(a[0])! - firstSeen.get(b[0])!)
+    .map(([t]) => t)
+    .join(" ");
+}
+
 /** Share of query tokens that appear in the listing title (0..1). */
 export function titleScore(query: string, listingTitle: string): number {
   const q = new Set(tokenize(query));

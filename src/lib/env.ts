@@ -26,6 +26,15 @@ export const env = {
   liqpayPrivateKey: read("LIQPAY_PRIVATE_KEY"),
 
   monobankToken: read("MONOBANK_TOKEN"),
+
+  // Free key from the Nova Poshta business cabinet (Settings → Security → API 2.0) for exact domestic prices.
+  novaPoshtaApiKey: read("NOVAPOSHTA_API_KEY"),
+
+  // Shown on the policy and contacts pages (payment providers require them).
+  legalCompany: read("LEGAL_COMPANY_NAME") ?? "[Company / FOP full name]",
+  legalEmail: read("LEGAL_EMAIL") ?? "[support email]",
+  legalAddress: read("LEGAL_ADDRESS") ?? "[registered address]",
+  legalTaxId: read("LEGAL_TAX_ID") ?? "[tax ID / EDRPOU]",
 } as const;
 
 /** Which integrations run on real APIs vs. generated demo data. */

@@ -2,18 +2,23 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { PageHeader, Skeleton } from "@/components/ui";
+import { fmt } from "@/i18n/config";
+import { getMessages } from "@/i18n/server";
 import { requireUser } from "@/lib/auth";
 import { buildSubscribeCheckout } from "@/lib/billing/liqpay";
 import { db } from "@/lib/db";
 import { PLANS, type PlanId } from "@/lib/plans";
 
-export const metadata: Metadata = { title: "Pay with LiqPay" };
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getMessages()).billing.liqpayTitle };
+}
 
 /** LiqPay Checkout must be opened with a signed form POST, so this page renders and submits it. */
-export default function LiqpayCheckoutPage({ searchParams }: PageProps<"/dashboard/billing/liqpay">) {
+export default async function LiqpayCheckoutPage({ searchParams }: PageProps<"/dashboard/billing/liqpay">) {
+  const t = (await getMessages()).billing;
   return (
     <>
-      <PageHeader title="Pay with LiqPay" />
+      <PageHeader title={t.liqpayTitle} />
       <Suspense fallback={<Skeleton className="h-40" />}>
         <CheckoutForm searchParams={searchParams} />
       </Suspense>
@@ -22,7 +27,7 @@ export default function LiqpayCheckoutPage({ searchParams }: PageProps<"/dashboa
 }
 
 async function CheckoutForm({ searchParams }: Pick<PageProps<"/dashboard/billing/liqpay">, "searchParams">) {
-  const user = await requireUser();
+  const [user, messages] = await Promise.all([requireUser(), getMessages()]);
   const { ref } = await searchParams;
   const sub =
     typeof ref === "string"
@@ -38,11 +43,10 @@ async function CheckoutForm({ searchParams }: Pick<PageProps<"/dashboard/billing
       <input type="hidden" name="data" value={form.data} />
       <input type="hidden" name="signature" value={form.signature} />
       <p className="text-sm">
-        <strong>{plan.name}</strong> plan — ₴{plan.priceUah.toLocaleString("uk-UA")} per month, charged automatically by LiqPay.
-        Cancel anytime from Plan &amp; billing.
+        {fmt(messages.billing.liqpayText, { plan: messages.plans[plan.id].name, price: plan.priceUah.toLocaleString("uk-UA") })}
       </p>
       <button type="submit" className="btn-primary w-full">
-        Continue to LiqPay
+        {messages.billing.liqpayContinue}
       </button>
     </form>
   );

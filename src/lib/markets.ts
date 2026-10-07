@@ -136,8 +136,8 @@ export const MARKETS: Record<CountryCode, Market> = {
 
 export const MARKET_CURRENCIES = [...new Set(COUNTRY_CODES.map((c) => MARKETS[c].currency))];
 
-export function isCountryCode(value: string): value is CountryCode {
-  return (COUNTRY_CODES as readonly string[]).includes(value);
+export function isCountryCode(value: unknown): value is CountryCode {
+  return typeof value === "string" && (COUNTRY_CODES as readonly string[]).includes(value);
 }
 
 export type CostSettings = Partial<Record<CountryCode, Partial<CostAssumptions>>>;

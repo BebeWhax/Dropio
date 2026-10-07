@@ -1,4 +1,5 @@
 import "server-only";
+import { channelFeeModel, getChannel, type ChannelId } from "@/lib/channels";
 import { MARKETS, resolveAssumptions, type CostSettings, type CountryCode } from "@/lib/markets";
 import { calculateImportCharges, type CategoryId, type ImportCharges } from "@/lib/pricing/duty";
 import { calculateLandedCost, estimateShippingUsd, type ImportPayer, type LandedCostBreakdown } from "@/lib/pricing/landed-cost";
@@ -19,7 +20,8 @@ export interface AnalysisInput {
   /** Per-country query overrides, e.g. a Ukrainian-language query for Ukraine. */
   queryByCountry?: Partial<Record<CountryCode, string>>;
   gtin?: string;
-  supplierCostUsd: number;
+  /** Unknown for market-only lookups (e.g. CSV rows with just a product name): no margin is computed. */
+  supplierCostUsd?: number;
   weightGrams?: number;
   /** Supplier variant used for carrier shipping quotes. */
   variantId?: string;
@@ -28,6 +30,14 @@ export interface AnalysisInput {
   shippingPreference: ShippingPreference;
   category: CategoryId;
   importPayer: ImportPayer;
+  /** "auto" uses the default marketplace fees from Cost settings (eBay; Prom in Ukraine). */
+  channel: ChannelId | "auto";
+  /** Overrides the channel's typical commission (category-specific rate). */
+  commissionPct?: number;
+  /** Orders per month that a channel's monthly fee is spread over. */
+  ordersPerMonth: number;
+  /** Paid advertising per order, in USD. */
+  adCostUsd: number;
   countries: CountryCode[];
   settings: CostSettings;
 }
@@ -53,9 +63,14 @@ export interface CountryAnalysis {
   shipping: ShippingQuote;
   /** Every carrier option the supplier offered. */
   shippingOptions: ShippingQuote[];
-  importCharges: ImportCharges;
+  /** Null when the supplier cost is unknown. */
+  importCharges: ImportCharges | null;
   breakdown: LandedCostBreakdown | null;
   samples: SampleListing[];
+  /** The selling channel whose fees were used (absent for "auto"). */
+  channel?: ChannelId;
+  /** The chosen channel doesn't operate in this country. */
+  channelUnavailable?: boolean;
   error?: string;
 }
 
@@ -101,18 +116,27 @@ export async function runAnalysis(input: AnalysisInput): Promise<AnalysisResult>
       const assumptions = resolveAssumptions(code, input.settings);
       const query = input.queryByCountry?.[code] || input.query;
       const { chosen: shipping, options: shippingOptions } = await resolveShipping(input, code);
-      const importCharges = calculateImportCharges({
+      const cost = input.supplierCostUsd;
+      const importCharges =
+        cost === undefined
+          ? null
+          : calculateImportCharges({
         country: code,
         category: input.category,
-        goodsUsd: input.supplierCostUsd,
+        goodsUsd: cost,
         shippingUsd: shipping.costUsd,
         usdPer,
         currency: market.currency,
         dutyRateOverride: assumptions.dutyRateOverride,
         handlingFee: assumptions.handlingFee,
-      });
+            });
+
+      const channelFees = input.channel === "auto" ? undefined : getChannel(input.channel).fees[code];
+      const channelUnavailable = input.channel !== "auto" && !channelFees;
 
       const empty: CountryAnalysis = {
+        channel: input.channel === "auto" ? undefined : input.channel,
+        channelUnavailable: channelUnavailable || undefined,
         country: code,
         currency: market.currency,
         query,
@@ -151,15 +175,26 @@ export async function runAnalysis(input: AnalysisInput): Promise<AnalysisResult>
           max: priceLocal.max * usdPerUnit,
         };
 
-        const breakdown = calculateLandedCost({
-          sellPriceUsd: priceUsd.median,
-          supplierCostUsd: input.supplierCostUsd,
-          shippingUsd: shipping.costUsd,
-          importCharges,
-          importPayer: input.importPayer,
-          assumptions,
-          marketToUsd: usdPerUnit,
-        });
+        const model = channelFees
+          ? channelFeeModel(channelFees, { commissionPct: input.commissionPct, ordersPerMonth: input.ordersPerMonth, adCostPerOrder: 0 })
+          : null;
+        const breakdown =
+          cost === undefined || !importCharges || channelUnavailable
+            ? null
+            : calculateLandedCost({
+                sellPriceUsd: priceUsd.median,
+                supplierCostUsd: cost,
+                shippingUsd: shipping.costUsd,
+                importCharges,
+                importPayer: input.importPayer,
+                assumptions,
+                marketToUsd: usdPerUnit,
+                channelFees: model
+                  ? { pct: model.pct, fixedUsd: model.fixed * usdPerUnit + input.adCostUsd }
+                  : input.adCostUsd > 0
+                    ? { pct: assumptions.feeRate, fixedUsd: assumptions.fixedFee * usdPerUnit + input.adCostUsd }
+                    : undefined,
+              });
 
         return {
           ...empty,

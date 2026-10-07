@@ -70,3 +70,28 @@ describe("LiqPay signature", async () => {
     expect(decodeLiqpayCallback(privateKey, data, "forged")).toBeNull();
   });
 });
+
+describe("deriveQueryFromTitles", async () => {
+  const { deriveQueryFromTitles } = await import("@/lib/pricing/matching");
+  it("keeps words shared by several matched titles", () => {
+    expect(
+      deriveQueryFromTitles([
+        "Portable Mini Handheld Fan USB Rechargeable",
+        "Mini handheld fan, 3 speeds, pink",
+        "USB handheld fan for travel",
+        "Desk lamp LED",
+      ]),
+    ).toBe("mini handheld fan usb");
+  });
+});
+
+describe("lensCurrency", async () => {
+  const { lensCurrency } = await import("@/lib/providers/serpapi");
+  it("maps symbols to ISO codes, reading $ as the searched country's dollar", () => {
+    expect(lensCurrency("$", "CAD")).toBe("CAD");
+    expect(lensCurrency("$", "EUR")).toBe("USD");
+    expect(lensCurrency("₴", "UAH")).toBe("UAH");
+    expect(lensCurrency("€", "USD")).toBe("EUR");
+    expect(lensCurrency(undefined, "USD")).toBeNull();
+  });
+});

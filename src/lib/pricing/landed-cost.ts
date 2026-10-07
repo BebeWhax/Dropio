@@ -14,6 +14,11 @@ export interface LandedCostInput {
   assumptions: CostAssumptions;
   /** USD per 1 unit of the market currency, for the fixed fees. */
   marketToUsd: number;
+  /**
+   * Selling-channel fees as pct × price + fixed (USD). When given, they replace
+   * the default marketplace fee from the cost assumptions.
+   */
+  channelFees?: { pct: number; fixedUsd: number };
 }
 
 export interface LandedCostBreakdown {
@@ -54,8 +59,9 @@ export function calculateLandedCost(input: LandedCostInput): LandedCostBreakdown
   const sellerImportUsd = importPaidByBuyer ? 0 : importCharges.totalUsd;
 
   // Marketplaces charge commission on the buyer's total including tax.
-  const fixedFeeUsd = a.fixedFee * marketToUsd;
-  const marketplaceFeeUsd = sellPriceUsd * a.feeRate + fixedFeeUsd;
+  const feePct = input.channelFees?.pct ?? a.feeRate;
+  const fixedFeeUsd = input.channelFees?.fixedUsd ?? a.fixedFee * marketToUsd;
+  const marketplaceFeeUsd = sellPriceUsd * feePct + fixedFeeUsd;
   const turnoverTaxUsd = sellPriceUsd * a.turnoverTaxRate;
 
   const goodsCostUsd = supplierCostUsd + shippingUsd + sellerImportUsd;
@@ -63,7 +69,7 @@ export function calculateLandedCost(input: LandedCostInput): LandedCostBreakdown
   const profitUsd = netRevenueUsd - totalCostUsd;
 
   // Solve price/(1+vat) − price·(fee + turnoverTax) − fixedFee − goodsCost = 0 for price.
-  const keptPerDollar = 1 / (1 + a.vatRate) - a.feeRate - a.turnoverTaxRate;
+  const keptPerDollar = 1 / (1 + a.vatRate) - feePct - a.turnoverTaxRate;
   const breakEvenPriceUsd = keptPerDollar > 0 ? (goodsCostUsd + fixedFeeUsd) / keptPerDollar : Infinity;
 
   return {

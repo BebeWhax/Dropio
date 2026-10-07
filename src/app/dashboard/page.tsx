@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { DemoBanner } from "@/components/demo-banner";
 import { Meter, PageHeader, ProductImage, Skeleton, Stat, pct } from "@/components/ui";
+import { getMessages } from "@/i18n/server";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { dataSources } from "@/lib/env";
@@ -10,17 +11,20 @@ import { MARKETS, isCountryCode } from "@/lib/markets";
 import { effectivePlan } from "@/lib/plans";
 import { getUsageToday } from "@/lib/usage";
 
-export const metadata: Metadata = { title: "Overview" };
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getMessages()).overview.title };
+}
 
-export default function OverviewPage() {
+export default async function OverviewPage() {
+  const t = (await getMessages()).overview;
   return (
     <>
       <PageHeader
-        title="Overview"
-        description="Your plan usage and recently saved products."
+        title={t.title}
+        description={t.description}
         actions={
           <Link href="/dashboard/research" className="btn-primary">
-            Research products
+            {t.research}
           </Link>
         }
       />
@@ -32,7 +36,8 @@ export default function OverviewPage() {
 }
 
 async function Overview() {
-  const user = await requireUser();
+  const [user, messages] = await Promise.all([requireUser(), getMessages()]);
+  const t = messages.overview;
   const plan = effectivePlan(user);
   const [usage, saved, savedCount] = await Promise.all([
     getUsageToday(user.id),
@@ -44,23 +49,29 @@ async function Overview() {
     <>
       <DemoBanner suppliers={!dataSources.suppliersLive} markets={!dataSources.marketsLive} />
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Stat label="Plan" value={plan.name} hint={<Link href="/dashboard/billing" className="text-accent">Manage plan</Link>} />
-        <UsageStat label="Analyses today" used={usage.analysis} limit={plan.analysesPerDay} />
-        <UsageStat label="Searches today" used={usage.search} limit={plan.searchesPerDay} />
-        <UsageStat label="Watchlist" used={savedCount} limit={plan.maxSaved} />
+        <Stat
+          label={t.plan}
+          value={messages.plans[plan.id].name}
+          hint={
+            <Link href="/dashboard/billing" className="text-accent">
+              {t.managePlan}
+            </Link>
+          }
+        />
+        <UsageStat label={t.analysesToday} used={usage.analysis} limit={plan.analysesPerDay} />
+        <UsageStat label={t.searchesToday} used={usage.search} limit={plan.searchesPerDay} />
+        <UsageStat label={t.watchlist} used={savedCount} limit={plan.maxSaved} />
       </div>
 
       <section className="mt-8">
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="font-semibold">Recently saved</h2>
+          <h2 className="font-semibold">{t.recentlySaved}</h2>
           <Link href="/dashboard/saved" className="text-sm text-accent">
-            View all
+            {t.viewAll}
           </Link>
         </div>
         {saved.length === 0 ? (
-          <div className="card p-8 text-center text-sm text-muted">
-            Nothing saved yet. Analyze a product and save it to track its margins here.
-          </div>
+          <div className="card p-8 text-center text-sm text-muted">{t.nothingSaved}</div>
         ) : (
           <ul className="card divide-y divide-border">
             {saved.map((item) => (
@@ -73,7 +84,7 @@ async function Overview() {
                       {MARKETS[item.bestCountry].flag} {pct(item.bestMarginPct)}
                     </span>
                   ) : (
-                    <span className="text-sm text-muted">No market data</span>
+                    <span className="text-sm text-muted">{t.noMarketData}</span>
                   )}
                 </Link>
               </li>

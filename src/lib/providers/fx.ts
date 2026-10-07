@@ -1,6 +1,7 @@
 import "server-only";
 import { cached } from "@/lib/cache";
 import { MARKET_CURRENCIES } from "@/lib/markets";
+import { CARRIER_CURRENCIES } from "@/lib/shipping/carriers";
 
 export interface FxRates {
   /** Units of each currency per 1 USD. */
@@ -11,7 +12,7 @@ export interface FxRates {
 }
 
 // Only used if the live feeds are unreachable.
-const FALLBACK_RATES: Record<string, number> = { USD: 1, EUR: 0.89, GBP: 0.76, CAD: 1.38, AUD: 1.52, UAH: 44.9 };
+const FALLBACK_RATES: Record<string, number> = { USD: 1, EUR: 0.89, GBP: 0.76, CAD: 1.38, AUD: 1.52, UAH: 44.9, CNY: 7.1 };
 
 // The ECB feed (Frankfurter) has no hryvnia, so UAH comes from the National Bank of Ukraine.
 const NBU_CURRENCIES = new Set(["UAH"]);
@@ -26,9 +27,9 @@ async function fetchNbuUahPerUsd(): Promise<number> {
 }
 
 export async function getFxRates(): Promise<FxRates> {
-  const symbols = MARKET_CURRENCIES.filter((c) => c !== "USD" && !NBU_CURRENCIES.has(c)).join(",");
+  const symbols = [...MARKET_CURRENCIES, ...CARRIER_CURRENCIES].filter((c) => c !== "USD" && !NBU_CURRENCIES.has(c)).join(",");
   try {
-    return await cached("fx:usd:v2", 12 * 3600, async () => {
+    return await cached("fx:usd:v3", 12 * 3600, async () => {
       const [res, uah] = await Promise.all([
         fetch(`https://api.frankfurter.dev/v1/latest?base=USD&symbols=${symbols}`),
         fetchNbuUahPerUsd(),

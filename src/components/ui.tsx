@@ -42,11 +42,12 @@ export function Stat({ label, value, hint }: { label: string; value: ReactNode; 
   );
 }
 
-export function Meter({ used, limit }: { used: number; limit: number }) {
+/** A quota meter turns red when full; a progress meter stays in the accent colour. */
+export function Meter({ used, limit, kind = "quota" }: { used: number; limit: number; kind?: "quota" | "progress" }) {
   const pct = Math.min(100, Math.round((used / Math.max(1, limit)) * 100));
   return (
     <div className="h-1.5 w-full overflow-hidden rounded-full bg-border">
-      <div className={`h-full rounded-full ${pct >= 100 ? "bg-negative" : "bg-accent"}`} style={{ width: `${pct}%` }} />
+      <div className={`h-full rounded-full ${pct >= 100 && kind === "quota" ? "bg-negative" : "bg-accent"}`} style={{ width: `${pct}%` }} />
     </div>
   );
 }

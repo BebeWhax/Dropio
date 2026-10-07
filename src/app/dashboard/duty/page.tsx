@@ -5,18 +5,21 @@ import { requireUser } from "@/lib/auth";
 import { COUNTRY_CODES, MARKETS, parseCostSettings, resolveAssumptions } from "@/lib/markets";
 import { CATEGORIES, calculateImportCharges, isCategoryId, type CategoryId } from "@/lib/pricing/duty";
 import { getFxRates, toUsd } from "@/lib/providers/fx";
+import { fmt } from "@/i18n/config";
+import { dutyNoteText } from "@/i18n/notes";
+import { getMessages } from "@/i18n/server";
 
-export const metadata: Metadata = { title: "Duty calculator" };
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getMessages()).duty.title };
+}
 
 const INPUT_CURRENCIES = ["USD", "EUR", "UAH"] as const;
 
-export default function DutyPage({ searchParams }: PageProps<"/dashboard/duty">) {
+export default async function DutyPage({ searchParams }: PageProps<"/dashboard/duty">) {
+  const t = (await getMessages()).duty;
   return (
     <>
-      <PageHeader
-        title="Duty calculator"
-        description="Import duty, border VAT and customs fees for one parcel from China, in every market at once."
-      />
+      <PageHeader title={t.title} description={t.description} />
       <Suspense fallback={<Skeleton className="h-96" />}>
         <Calculator searchParams={searchParams} />
       </Suspense>
@@ -30,7 +33,8 @@ function num(value: string | string[] | undefined, fallback: number): number {
 }
 
 async function Calculator({ searchParams }: Pick<PageProps<"/dashboard/duty">, "searchParams">) {
-  const user = await requireUser();
+  const [user, messages] = await Promise.all([requireUser(), getMessages()]);
+  const t = messages.duty;
   const sp = await searchParams;
   const currency = INPUT_CURRENCIES.find((c) => c === sp.cur) ?? "USD";
   const goods = num(sp.goods, currency === "UAH" ? 900 : 20);
@@ -67,19 +71,19 @@ async function Calculator({ searchParams }: Pick<PageProps<"/dashboard/duty">, "
       <form action="/dashboard/duty" className="card grid gap-4 p-4 md:grid-cols-5">
         <div>
           <label className="label" htmlFor="goods">
-            Goods value (what you pay the supplier)
+            {t.goods}
           </label>
           <input id="goods" name="goods" type="number" step="any" min="0" defaultValue={goods} className="input" />
         </div>
         <div>
           <label className="label" htmlFor="shipping">
-            Shipping cost
+            {t.shipping}
           </label>
           <input id="shipping" name="shipping" type="number" step="any" min="0" defaultValue={shipping} className="input" />
         </div>
         <div>
           <label className="label" htmlFor="cur">
-            Currency
+            {t.currency}
           </label>
           <select id="cur" name="cur" defaultValue={currency} className="input">
             {INPUT_CURRENCIES.map((c) => (
@@ -89,28 +93,28 @@ async function Calculator({ searchParams }: Pick<PageProps<"/dashboard/duty">, "
         </div>
         <div>
           <label className="label" htmlFor="cat">
-            Product category
+            {t.category}
           </label>
           <select id="cat" name="cat" defaultValue={category} className="input">
             {CATEGORIES.map((c) => (
               <option key={c.id} value={c.id}>
-                {c.label}
+                {messages.categories[c.id]}
               </option>
             ))}
           </select>
         </div>
         <div>
           <label className="label" htmlFor="lines">
-            Different item types in parcel
+            {t.lines}
           </label>
           <input id="lines" name="lines" type="number" min="1" max="20" defaultValue={lines} className="input" />
         </div>
         <div className="md:col-span-5">
           <button type="submit" className="btn-primary">
-            Calculate
+            {t.calculate}
           </button>
           <span className="ml-3 text-xs text-muted">
-            Rates as of October 2026 · FX {fx.date} · your duty overrides and handling fees from Cost settings apply.
+            {fmt(t.meta, { date: fx.date })}
           </span>
         </div>
       </form>
@@ -119,20 +123,20 @@ async function Calculator({ searchParams }: Pick<PageProps<"/dashboard/duty">, "
         <table className="w-full min-w-[820px] text-sm">
           <thead className="border-b border-border text-left text-xs text-muted">
             <tr>
-              <th className="px-4 py-3 font-medium">Destination</th>
-              <th className="px-4 py-3 text-right font-medium">Duty</th>
-              <th className="px-4 py-3 text-right font-medium">Border VAT/GST</th>
-              <th className="px-4 py-3 text-right font-medium">Fees</th>
-              <th className="px-4 py-3 text-right font-medium">Total charges</th>
-              <th className="px-4 py-3 text-right font-medium">Landed cost</th>
-              <th className="px-4 py-3 font-medium">Rules applied</th>
+              <th className="px-4 py-3 font-medium">{t.destination}</th>
+              <th className="px-4 py-3 text-right font-medium">{t.duty}</th>
+              <th className="px-4 py-3 text-right font-medium">{t.vat}</th>
+              <th className="px-4 py-3 text-right font-medium">{t.fees}</th>
+              <th className="px-4 py-3 text-right font-medium">{t.total}</th>
+              <th className="px-4 py-3 text-right font-medium">{t.landed}</th>
+              <th className="px-4 py-3 font-medium">{t.rules}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
             {rows.map(({ market, charges, landedUsd, toLocal }) => (
               <tr key={market.code} className="align-top">
                 <td className="px-4 py-3 whitespace-nowrap">
-                  {market.flag} {market.name}
+                  {market.flag} {messages.countries[market.code]}
                 </td>
                 <td className="px-4 py-3 text-right tabular-nums">{usd(charges.dutyUsd)}</td>
                 <td className="px-4 py-3 text-right tabular-nums">{usd(charges.importVatUsd)}</td>
@@ -151,8 +155,8 @@ async function Calculator({ searchParams }: Pick<PageProps<"/dashboard/duty">, "
                 </td>
                 <td className="px-4 py-3 text-xs text-muted">
                   <ul className="list-disc space-y-0.5 pl-4">
-                    {charges.notes.map((n) => (
-                      <li key={n}>{n}</li>
+                    {charges.notes.map((n, i) => (
+                      <li key={i}>{dutyNoteText(messages, n)}</li>
                     ))}
                   </ul>
                 </td>
@@ -161,10 +165,7 @@ async function Calculator({ searchParams }: Pick<PageProps<"/dashboard/duty">, "
           </tbody>
         </table>
       </div>
-      <p className="text-xs text-muted">
-        VAT that the marketplace charges at sale (UK, EU via IOSS, Australia) is already inside the selling price, so it
-        isn&apos;t listed here. Category rates are typical values — the exact HS code of your product decides the real rate.
-      </p>
+      <p className="text-xs text-muted">{t.footnote}</p>
     </div>
   );
 }

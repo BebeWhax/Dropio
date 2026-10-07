@@ -3,12 +3,12 @@
 import Link from "next/link";
 import { useActionState } from "react";
 import { login, signup, type AuthFormState } from "@/app/actions/auth";
+import { useI18n } from "@/i18n/provider";
 
 export function AuthForm({ mode, next }: { mode: "login" | "signup"; next?: string }) {
-  const [state, formAction, pending] = useActionState<AuthFormState, FormData>(
-    mode === "login" ? login : signup,
-    {},
-  );
+  const { t } = useI18n();
+  const a = t.auth;
+  const [state, formAction, pending] = useActionState<AuthFormState, FormData>(mode === "login" ? login : signup, {});
   const isSignup = mode === "signup";
 
   return (
@@ -22,20 +22,20 @@ export function AuthForm({ mode, next }: { mode: "login" | "signup"; next?: stri
       {isSignup && (
         <div>
           <label htmlFor="name" className="label">
-            Name (optional)
+            {a.name}
           </label>
           <input id="name" name="name" autoComplete="name" className="input" />
         </div>
       )}
       <div>
         <label htmlFor="email" className="label">
-          Email
+          {a.email}
         </label>
         <input id="email" name="email" type="email" required autoComplete="email" defaultValue={state.email} className="input" />
       </div>
       <div>
         <label htmlFor="password" className="label">
-          Password
+          {a.password}
         </label>
         <input
           id="password"
@@ -46,15 +46,15 @@ export function AuthForm({ mode, next }: { mode: "login" | "signup"; next?: stri
           autoComplete={isSignup ? "new-password" : "current-password"}
           className="input"
         />
-        {isSignup && <p className="mt-1 text-xs text-muted">At least 8 characters.</p>}
+        {isSignup && <p className="mt-1 text-xs text-muted">{a.passwordHint}</p>}
       </div>
       <button type="submit" disabled={pending} className="btn-primary w-full">
-        {pending ? "Please wait…" : isSignup ? "Create account" : "Log in"}
+        {pending ? a.wait : isSignup ? a.createAccount : a.login}
       </button>
       <p className="text-center text-sm text-muted">
-        {isSignup ? "Already have an account? " : "New to Dropio? "}
+        {isSignup ? a.haveAccount : a.newHere}
         <Link href={isSignup ? "/login" : "/signup"} className="font-medium text-accent">
-          {isSignup ? "Log in" : "Create an account"}
+          {isSignup ? a.goLogin : a.goSignup}
         </Link>
       </p>
     </form>

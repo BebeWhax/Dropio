@@ -5,28 +5,22 @@ import { cancelDemoSubscription, cancelUahSubscription, openBillingPortal, start
 import { PlanCards } from "@/components/plan-cards";
 import { SubmitButton } from "@/components/submit-button";
 import { Notice, PageHeader, Skeleton } from "@/components/ui";
+import { fmt } from "@/i18n/config";
+import { getMessages } from "@/i18n/server";
 import { requireUser } from "@/lib/auth";
 import { billingProviders, isBillingProviderId, type BillingProviderId } from "@/lib/billing";
 import { env } from "@/lib/env";
 import { effectivePlan } from "@/lib/plans";
 
-export const metadata: Metadata = { title: "Plan & billing" };
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getMessages()).billing.title };
+}
 
-const ERRORS: Record<string, string> = {
-  "billing-not-configured": "This payment method isn't configured yet. Please contact support.",
-  "price-missing": "This plan isn't available for purchase yet.",
-  "switch-provider": "Cancel your current subscription before paying with a different method.",
-  cancel: "We couldn't cancel the subscription with the payment provider. Please try again.",
-  checkout: "Could not start checkout. Please try again.",
-  plan: "Unknown plan.",
-};
-
-const PROVIDER_NAMES: Record<string, string> = { stripe: "card (Stripe)", liqpay: "LiqPay", monobank: "monobank", demo: "demo billing" };
-
-export default function BillingPage({ searchParams }: PageProps<"/dashboard/billing">) {
+export default async function BillingPage({ searchParams }: PageProps<"/dashboard/billing">) {
+  const t = (await getMessages()).billing;
   return (
     <>
-      <PageHeader title="Plan & billing" description="Upgrade for more countries, analyses and custom cost settings." />
+      <PageHeader title={t.title} description={t.description} />
       <Suspense fallback={<Skeleton className="h-96" />}>
         <Billing searchParams={searchParams} />
       </Suspense>
@@ -35,11 +29,28 @@ export default function BillingPage({ searchParams }: PageProps<"/dashboard/bill
 }
 
 async function Billing({ searchParams }: Pick<PageProps<"/dashboard/billing">, "searchParams">) {
-  const user = await requireUser();
+  const [user, messages] = await Promise.all([requireUser(), getMessages()]);
+  const t = messages.billing;
   const plan = effectivePlan(user);
   const sp = await searchParams;
   const providers = billingProviders();
-  const error = typeof sp.error === "string" ? ERRORS[sp.error] : undefined;
+
+  const errors: Record<string, string> = {
+    "billing-not-configured": t.errBillingNotConfigured,
+    "price-missing": t.errPriceMissing,
+    "switch-provider": t.errSwitchProvider,
+    cancel: t.errCancel,
+    checkout: t.errCheckout,
+    plan: t.errPlan,
+  };
+  const error = typeof sp.error === "string" ? errors[sp.error] : undefined;
+  const providerCopy: Record<BillingProviderId, { label: string; description: string }> = {
+    stripe: t.providerCard,
+    liqpay: t.providerLiqpay,
+    monobank: t.providerMono,
+  };
+  const providerName = (id: string | null | undefined) => t.providers[(id ?? "") as keyof typeof t.providers] ?? "—";
+  const statusName = t.status[user.subscriptionStatus as keyof typeof t.status] ?? user.subscriptionStatus;
 
   const subscribed = plan.id !== "free" && user.subscriptionStatus !== "canceled";
   // While subscribed, the payment method is fixed to the current provider.
@@ -47,56 +58,50 @@ async function Billing({ searchParams }: Pick<PageProps<"/dashboard/billing">, "
   const pay: BillingProviderId = lockedProvider ?? (isBillingProviderId(sp.pay) ? sp.pay : "stripe");
   const provider = providers.find((p) => p.id === pay)!;
   const demo = !provider.configured && !env.isProduction;
+  const planName = (id: keyof typeof messages.plans) => (messages.plans[id] as { name: string }).name;
 
   return (
     <>
-      {sp.success && <Notice tone="success">Thanks! Your plan is active.</Notice>}
-      {sp.pending && (
-        <Notice tone="success">
-          Payment received by {PROVIDER_NAMES[String(sp.provider)] ?? "the provider"}. Your plan activates as soon as the
-          provider confirms it — usually within a minute. Refresh this page if it hasn&apos;t updated yet.
-        </Notice>
-      )}
-      {sp.canceled && <Notice>Checkout canceled. You haven&apos;t been charged.</Notice>}
-      {sp.cancelled && <Notice>Subscription cancelled. You keep your plan until the end of the paid period.</Notice>}
+      {sp.success && <Notice tone="success">{t.success}</Notice>}
+      {sp.pending && <Notice tone="success">{fmt(t.pending, { provider: providerName(String(sp.provider)) })}</Notice>}
+      {sp.canceled && <Notice>{t.canceled}</Notice>}
+      {sp.cancelled && <Notice>{t.cancelled}</Notice>}
       {error && <Notice tone="error">{error}</Notice>}
 
       <div className="card mb-8 flex flex-wrap items-center justify-between gap-4 p-5">
         <div>
-          <div className="text-xs font-medium text-muted">Current plan</div>
-          <div className="text-xl font-semibold">{plan.name}</div>
+          <div className="text-xs font-medium text-muted">{t.currentPlan}</div>
+          <div className="text-xl font-semibold">{planName(plan.id)}</div>
           <div className="mt-1 text-sm text-muted">
-            {plan.id === "free"
-              ? "Free"
-              : `${user.subscriptionStatus.replace("_", " ")} · paid with ${PROVIDER_NAMES[user.billingProvider ?? ""] ?? "—"}`}
+            {plan.id === "free" ? t.free : `${statusName} · ${fmt(t.paidWith, { provider: providerName(user.billingProvider) })}`}
             {user.currentPeriodEnd &&
               plan.id !== "free" &&
-              ` · ${user.subscriptionStatus === "canceled" ? "ends" : "renews"} ${user.currentPeriodEnd.toISOString().slice(0, 10)}`}
+              ` · ${fmt(user.subscriptionStatus === "canceled" ? t.ends : t.renews, { date: user.currentPeriodEnd.toISOString().slice(0, 10) })}`}
           </div>
         </div>
         {subscribed && user.billingProvider === "stripe" && (
           <form action={openBillingPortal}>
-            <SubmitButton className="btn-secondary" pendingText="Opening…">
-              Manage subscription & invoices
+            <SubmitButton className="btn-secondary" pendingText={t.opening}>
+              {t.manage}
             </SubmitButton>
           </form>
         )}
         {subscribed && (user.billingProvider === "liqpay" || user.billingProvider === "monobank") && (
           <form action={cancelUahSubscription}>
-            <SubmitButton className="btn-secondary" pendingText="Cancelling…">
-              Cancel subscription
+            <SubmitButton className="btn-secondary" pendingText={t.cancelling}>
+              {t.cancel}
             </SubmitButton>
           </form>
         )}
         {subscribed && user.billingProvider === "demo" && (
           <form action={cancelDemoSubscription}>
-            <SubmitButton className="btn-secondary">Cancel (demo)</SubmitButton>
+            <SubmitButton className="btn-secondary">{t.cancelDemo}</SubmitButton>
           </form>
         )}
       </div>
 
       <div className="mb-4">
-        <div className="label">Pay with</div>
+        <div className="label">{t.payWith}</div>
         <div className="flex flex-wrap gap-2">
           {providers.map((p) => {
             const active = p.id === pay;
@@ -111,23 +116,16 @@ async function Billing({ searchParams }: Pick<PageProps<"/dashboard/billing">, "
                   active ? "border-accent bg-accent-soft text-accent" : "border-border bg-surface hover:bg-background"
                 } ${disabled ? "pointer-events-none opacity-50" : ""}`}
               >
-                <span className="font-medium">{p.label}</span>
-                <span className="block text-xs text-muted">{p.description}</span>
+                <span className="font-medium">{providerCopy[p.id].label}</span>
+                <span className="block text-xs text-muted">{providerCopy[p.id].description}</span>
               </Link>
             );
           })}
         </div>
-        {lockedProvider && (
-          <p className="mt-2 text-xs text-muted">To pay with another method, cancel your current subscription first.</p>
-        )}
+        {lockedProvider && <p className="mt-2 text-xs text-muted">{t.lockedHint}</p>}
       </div>
 
-      {demo && (
-        <Notice tone="warning">
-          <strong>Demo billing:</strong> {provider.label} isn&apos;t configured, so upgrades apply instantly without payment.
-          Add its keys in <code>.env</code> to take real payments.
-        </Notice>
-      )}
+      {demo && <Notice tone="warning">{fmt(t.demo, { provider: providerCopy[provider.id].label })}</Notice>}
 
       <PlanCards
         currency={provider.currency}
@@ -135,20 +133,20 @@ async function Billing({ searchParams }: Pick<PageProps<"/dashboard/billing">, "
           if (p.id === plan.id) {
             return (
               <button disabled className="btn-secondary w-full">
-                Current plan
+                {t.currentPlanBtn}
               </button>
             );
           }
           if (p.id === "free") {
-            return <p className="text-center text-xs text-muted">{subscribed ? "Cancel anytime above" : "Included"}</p>;
+            return <p className="text-center text-xs text-muted">{subscribed ? t.cancelAnytime : t.included}</p>;
           }
           const switchingStripe = subscribed && pay === "stripe" && user.billingProvider === "stripe";
           return (
             <form action={switchingStripe ? openBillingPortal : startCheckout}>
               <input type="hidden" name="plan" value={p.id} />
               <input type="hidden" name="provider" value={pay} />
-              <SubmitButton className="btn-primary w-full" pendingText="Redirecting…">
-                {plan.id === "free" ? `Upgrade to ${p.name}` : `Switch to ${p.name}`}
+              <SubmitButton className="btn-primary w-full" pendingText={t.redirecting}>
+                {fmt(plan.id === "free" ? t.upgradeTo : t.switchTo, { plan: planName(p.id) })}
               </SubmitButton>
             </form>
           );

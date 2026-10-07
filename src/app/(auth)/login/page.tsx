@@ -1,22 +1,17 @@
 import type { Metadata } from "next";
-import { Suspense } from "react";
 import { AuthForm } from "@/components/auth-form";
+import { getMessages } from "@/i18n/server";
 
-export const metadata: Metadata = { title: "Log in" };
-
-export default function LoginPage({ searchParams }: PageProps<"/login">) {
-  return (
-    <>
-      <h1 className="mb-6 text-xl font-semibold">Log in</h1>
-      {/* searchParams is request data, so it renders behind a boundary. */}
-      <Suspense fallback={<AuthForm mode="login" />}>
-        <LoginForm searchParams={searchParams} />
-      </Suspense>
-    </>
-  );
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getMessages()).auth.loginTitle };
 }
 
-async function LoginForm({ searchParams }: Pick<PageProps<"/login">, "searchParams">) {
-  const { next } = await searchParams;
-  return <AuthForm mode="login" next={typeof next === "string" ? next : undefined} />;
+export default async function LoginPage({ searchParams }: PageProps<"/login">) {
+  const [t, { next }] = await Promise.all([getMessages(), searchParams]);
+  return (
+    <>
+      <h1 className="mb-6 text-xl font-semibold">{t.auth.loginTitle}</h1>
+      <AuthForm mode="login" next={typeof next === "string" ? next : undefined} />
+    </>
+  );
 }

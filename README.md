@@ -20,6 +20,40 @@ Subscription platform for dropshippers. Users search supplier products, compare 
 
 If an integration has no API keys, it runs on generated **demo data**, and the UI labels that data clearly. Every API response is cached in the database (`ApiCache` table) to protect the free quotas: CJ allows 1 request per second, and eBay allows about 5,000 calls per day.
 
+## Features
+
+| Area | Where | Notes |
+|---|---|---|
+| Product research | `/dashboard/research` | CJ catalogue search, or your own product with cost |
+| Margin analysis | `/dashboard/analyze` | Up to 9 countries, sales channel, shipping preference, DDP/DDU |
+| Bulk CSV search | `/dashboard/bulk` | Upload product names (optional cost/EAN); background processing, CSV export |
+| Image search | `/dashboard/image` | Google Lens (SerpApi), eBay search-by-image (US/UK/DE/AU), CJ image search |
+| Duty calculator | `/dashboard/duty` | Per-country low-value parcel rules × product category |
+| Shipping calculator | `/dashboard/shipping` | Carrier tariffs by weight/volume; Nova Poshta live API |
+| Sales channels | `/dashboard/channels` | Fees per channel and country: eBay, Amazon, Etsy, TikTok Shop, Shopify, WooCommerce, Wix, Prom, Rozetka, OLX, Epicentr |
+| Languages | menu → 🌐 | English and Ukrainian (`src/i18n/messages/*`; Ukrainian is type-checked against English) |
+| Policies | `/terms`, `/privacy`, `/refunds`, `/contacts` | **Drafts** — fill `LEGAL_*` env vars and have them reviewed |
+
+### Shipping tariffs (`src/lib/shipping/`)
+
+Each carrier service is a table: volumetric divisor, rounding step, maximum weight and size, and weight bands, per-kg rates or volume bands. Fuel surcharge, insurance and cash-on-delivery fees are added on top.
+
+The billed weight is max(actual, L×W×H ÷ divisor). Every table records its `source` and `asOf` date; update them when carriers change prices. Tables marked `estimate: true` come from secondary sources.
+
+Carriers in the tables:
+
+- **Nova Poshta:** official tariffs from 10 Sep 2026; exact prices via the free API when `NOVAPOSHTA_API_KEY` is set.
+- **Ukrposhta:** priced by box volume since April 2026.
+- **USPS, Royal Mail, DHL Paket, Colissimo, Poste Italiane, Correos, Canada Post, Australia Post.**
+- **Amazon Shipping and Amazon FBA fees.**
+- **China → buyer:** ePacket, YunExpress, FedEx (FedEx at its list price, which is an upper bound).
+
+### Sales channels (`src/lib/channels.ts`)
+
+Each channel has these fees per country: monthly plan, commission (with category range), payment processing, per-order fee and extra percentage fees.
+
+In the analysis, the chosen channel replaces the default marketplace fee. The monthly fee is spread over your orders per month, and ad cost is added per order.
+
 ## Getting started
 
 ```bash

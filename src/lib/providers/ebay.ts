@@ -1,4 +1,5 @@
 import "server-only";
+import { createHash } from "node:crypto";
 import { cached, getCache, setCache } from "@/lib/cache";
 import type { Market } from "@/lib/markets";
 import { ProviderError, type MarketListing, type MarketProvider, type MarketSearch } from "./types";
@@ -70,23 +71,56 @@ export class EbayProvider implements MarketProvider {
       });
       if (!res.ok) throw new ProviderError("eBay", `search failed on ${marketplaceId} (HTTP ${res.status})`);
       const body = (await res.json()) as { itemSummaries?: EbayItemSummary[] };
-
-      return (body.itemSummaries ?? []).flatMap((item): MarketListing[] => {
-        const price = Number(item.price?.value);
-        if (!item.price || !Number.isFinite(price)) return [];
-        const ship = item.shippingOptions?.[0]?.shippingCost;
-        return [
-          {
-            id: item.itemId,
-            title: item.title,
-            price,
-            shipping: ship && ship.currency === item.price.currency ? Number(ship.value) : null,
-            currency: item.price.currency,
-            url: item.itemWebUrl,
-            imageUrl: item.image?.imageUrl,
-          },
-        ];
-      });
+      return mapItemSummaries(body.itemSummaries);
     });
   }
+
+  /**
+   * Visually similar listings for a photo. eBay supports this only on the
+   * US, UK, German and Australian sites.
+   */
+  async searchByImage(market: Market, imageBase64: string): Promise<MarketListing[]> {
+    if (market.priceSource.kind !== "ebay" || !EBAY_IMAGE_SEARCH_MARKETS.has(market.code)) return [];
+    const marketplaceId = market.priceSource.marketplaceId;
+    const imageHash = createHash("sha256").update(imageBase64).digest("hex").slice(0, 32);
+
+    return cached(`ebay:image:${market.code}:${imageHash}`, 24 * 3600, async () => {
+      const params = new URLSearchParams({ limit: "50", filter: "buyingOptions:{FIXED_PRICE},conditions:{NEW}" });
+      const res = await fetch(`${this.host}/buy/browse/v1/item_summary/search_by_image?${params}`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${await this.getToken()}`,
+          "Content-Type": "application/json",
+          "X-EBAY-C-MARKETPLACE-ID": marketplaceId,
+          "X-EBAY-C-ENDUSERCTX": `contextualLocation=country%3D${market.code}`,
+        },
+        body: JSON.stringify({ image: imageBase64 }),
+      });
+      if (!res.ok) throw new ProviderError("eBay", `image search failed on ${marketplaceId} (HTTP ${res.status})`);
+      const body = (await res.json()) as { itemSummaries?: EbayItemSummary[] };
+      return mapItemSummaries(body.itemSummaries);
+    });
+  }
+}
+
+/** eBay sites that support search_by_image. */
+export const EBAY_IMAGE_SEARCH_MARKETS = new Set(["US", "GB", "DE", "AU"]);
+
+function mapItemSummaries(items: EbayItemSummary[] | undefined): MarketListing[] {
+  return (items ?? []).flatMap((item): MarketListing[] => {
+    const price = Number(item.price?.value);
+    if (!item.price || !Number.isFinite(price)) return [];
+    const ship = item.shippingOptions?.[0]?.shippingCost;
+    return [
+      {
+        id: item.itemId,
+        title: item.title,
+        price,
+        shipping: ship && ship.currency === item.price.currency ? Number(ship.value) : null,
+        currency: item.price.currency,
+        url: item.itemWebUrl,
+        imageUrl: item.image?.imageUrl,
+      },
+    ];
+  });
 }
